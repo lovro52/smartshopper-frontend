@@ -1,591 +1,645 @@
 <template>
-  <div class="layout">
-    <!-- HEADER + INPUT BOX -->
-    <div class="card input-card">
-      <h1>SmartShopper 🛒</h1>
+  <div class="app">
+    <header class="header">
+      <h1>SmartShopper <span class="logo">🛒</span></h1>
+    </header>
 
-      <div class="grid-2">
-        <!-- Proizvodi -->
-        <div>
-          <label class="lbl">Proizvodi</label>
+    <div class="layout">
+      <!-- Lijevi panel -->
+      <aside class="panel">
+        <div class="card">
+          <h3>Proizvodi</h3>
           <textarea
-            v-model="input"
-            class="txt"
-            placeholder="Unesi proizvode, jedan po red (npr. 'mlijeko 1l 2.8%')"
-            rows="6"
-          />
-          <p class="hint">Primjeri: “mlijeko 1l 2.8%”, “jaja 10 kom”, “kruh”</p>
+            v-model="inputProducts"
+            rows="5"
+            placeholder="mlijeko 2.8%\nčokolada"
+          ></textarea>
         </div>
 
-        <!-- Adresa -->
-        <div>
-          <label class="lbl">Adresa</label>
-          <input
-            v-model="userAddress"
-            class="txt"
-            type="text"
-            placeholder="npr. Omladinska ulica 18, Rovinj"
-          />
-          <div class="hint">
-            Upisuj <b>ulica i broj, grad</b>. Primjeri:
-            <span class="pill">Ilica 34, Zagreb</span>
-            <span class="pill">Ulica Hrvatske Mornarice 1, Split</span>
+        <div class="card">
+          <h3>Lokacija</h3>
+          <div class="row">
+            <input
+              v-model="address"
+              @keyup.enter="geocode"
+              placeholder="Omladinska 18, Rovinj"
+            />
+            <button class="btn" :disabled="loadingGeo" @click="geocode">
+              <span v-if="loadingGeo" class="spinner"></span>
+              <span v-else>Geokodiraj</span>
+            </button>
           </div>
+          <div v-if="coords" class="coords">
+            📍 {{ coords.lat.toFixed(4) }}, {{ coords.lon.toFixed(4) }}
+          </div>
+        </div>
 
-          <div class="controls-row">
-            <label class="inline">
-              Sortiraj:
+        <div class="card">
+          <h3>Opcije</h3>
+          <div class="grid2">
+            <div>
+              <label class="lbl">Radius (m)</label>
+              <input
+                type="number"
+                v-model.number="radius"
+                min="500"
+                step="100"
+              />
+            </div>
+            <div>
+              <label class="lbl">Sortiraj po</label>
               <select v-model="sortBy">
-                <option value="distance">po udaljenosti</option>
-                <option value="price">po cijeni</option>
-                <option value="items">po broju artikala</option>
+                <option value="distance">Udaljenost</option>
+                <option value="price">Cijena</option>
+                <option value="items">Broj pronađenih</option>
               </select>
-            </label>
-
-            <label class="inline">
-              Radius:
-              <select v-model.number="radiusM">
-                <option :value="1500">1.5 km</option>
-                <option :value="3000">3 km</option>
-                <option :value="5000">5 km</option>
-                <option :value="10000">10 km</option>
-              </select>
-            </label>
+            </div>
+            <div>
+              <label class="lbl">Min. pronađenih</label>
+              <input type="number" v-model.number="minItems" min="0" />
+            </div>
+            <div class="toggles">
+              <label
+                ><input type="checkbox" v-model="useOSM" /> Koristi OSM</label
+              >
+              <label
+                ><input type="checkbox" v-model="preferReal" /> Samo stvarni
+                katalozi</label
+              >
+            </div>
           </div>
-
-          <div class="buttons">
-            <button
-              @click="getLocationFromAddress"
-              title="Pretvori adresu u lokaciju"
-            >
-              📍 Lokacija
-            </button>
-            <button class="primary" @click="fetchRecommendation">
-              🔎 Pretraži
-            </button>
-            <button class="secondary" @click="refreshCatalogs">
-              🔄 Osvježi kataloge
-            </button>
-          </div>
-
-          <p v-if="userLocation" class="muted">
-            Lokacija: {{ userLocation.lat.toFixed(4) }},
-            {{ userLocation.lon.toFixed(4) }}
-          </p>
         </div>
-      </div>
 
-      <p v-if="notice" class="notice">ℹ️ {{ notice }}</p>
-      <p v-if="error" class="error">⚠️ {{ error }}</p>
-    </div>
-
-    <!-- MAIN CONTENT: results (scrollable) + map -->
-    <div class="content">
-      <div class="card results-panel">
-        <div v-if="isLoading" class="loading">⏳ Učitavanje...</div>
-
-        <template v-else>
-          <h2>Rezultati:</h2>
-          <p v-if="hiddenCount > 0" class="muted sm">
-            (Sakriveno {{ hiddenCount }} trgovina bez pronađenih artikala)
-          </p>
-
-          <div v-if="displayedRecommendations.length === 0" class="empty">
-            Unesi proizvode i adresu, pa klikni <b>Pretraži</b>.
-          </div>
-
-          <div
-            v-for="shop in displayedRecommendations"
-            :key="shop.shop_name + '-' + shop.lat + '-' + shop.lon"
-            class="shop-card"
+        <div class="card actions">
+          <button class="btn primary" :disabled="loadingRec" @click="recommend">
+            <span v-if="loadingRec" class="spinner"></span>
+            <span v-else>Preporuči trgovine</span>
+          </button>
+          <button class="btn" @click="fetchBrands">Popis brendova</button>
+          <button
+            v-if="useDynamo"
+            class="btn ghost"
+            :disabled="loadingIngest"
+            @click="ingestAll"
           >
-            <div class="shop-header">
-              <h3>{{ shop.shop_name }}</h3>
-              <span class="chip">{{ shop.distance_km.toFixed(2) }} km</span>
-            </div>
+            <span v-if="loadingIngest" class="spinner"></span>
+            <span v-else>Ingest ALL → Dynamo</span>
+          </button>
+        </div>
+      </aside>
 
-            <div class="shop-stats">
-              <div class="stat">
-                <span class="label">Ukupna cijena</span>
-                <span class="value">{{ euro(shop.total_price) }}</span>
-              </div>
-              <div class="stat">
-                <span class="label">Artikli</span>
-                <span class="value">{{ shop.items_found }}</span>
-              </div>
-            </div>
+      <!-- Desno: mapa i rezultati -->
+      <section class="right">
+        <div id="map" ref="map" class="map"></div>
 
-            <details class="matched">
-              <summary>Detalji artikala</summary>
-              <ul>
-                <li v-for="item in shop.matched_products" :key="item.name">
-                  ✔ {{ item.name }} — {{ euro(item.price) }}
-                  <span
-                    class="tag"
-                    :class="item.source === 'dummy' ? 'tag-gray' : 'tag-green'"
-                  >
-                    {{ item.source === "dummy" ? "dummy" : "katalog" }}
-                  </span>
-                </li>
-              </ul>
-            </details>
+        <!-- Brandovi -->
+        <section class="brands" v-if="brands.length">
+          <h2>Brendovi (iz JSON/Dynamo):</h2>
+          <div class="chips">
+            <span class="chip" v-for="b in brands" :key="b">{{ b }}</span>
           </div>
-        </template>
-      </div>
+        </section>
 
-      <div class="card map-panel">
-        <div id="map"></div>
-      </div>
+        <!-- Rezultati sa zasebnim scrollom -->
+        <section class="results-board" v-if="recommendations.length">
+          <div class="results-head">
+            <h2>Preporuke ({{ recommendations.length }})</h2>
+          </div>
+          <div class="results-scroller">
+            <div class="cards">
+              <div
+                class="card rec"
+                v-for="(r, idx) in recommendations"
+                :key="r.shop_name + r.distance_km"
+                :id="'shop-' + idx"
+                @click="focusMarker(idx)"
+              >
+                <div class="card-header">
+                  <h3>{{ r.shop_name }}</h3>
+                  <span class="brand">{{ r.brand }}</span>
+                </div>
+                <p>
+                  Udaljenost: <strong>{{ r.distance_km }} km</strong>
+                </p>
+                <p>
+                  Ukupno:
+                  <strong>{{
+                    r.total_price != null
+                      ? r.total_price.toFixed(2) + " €"
+                      : "—"
+                  }}</strong>
+                </p>
+                <p>
+                  Pronađeno: <strong>{{ r.items_found }}</strong>
+                </p>
+                <ul class="items">
+                  <li v-for="m in r.matched" :key="m.name">
+                    {{ m.name }} — {{ m.price.toFixed(2) }} €
+                  </li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </section>
+      </section>
     </div>
+
+    <!-- Toast -->
+    <div v-if="toast.show" class="toast" :class="toast.kind">
+      {{ toast.msg }}
+    </div>
+
+    <section v-if="error" class="error">⚠️ {{ error }}</section>
   </div>
 </template>
 
 <script>
-import axios from "axios";
-import L from "leaflet";
-import "leaflet/dist/leaflet.css";
+import * as L from "leaflet";
+import iconRetinaUrl from "leaflet/dist/images/marker-icon-2x.png";
+import iconUrl from "leaflet/dist/images/marker-icon.png";
+import shadowUrl from "leaflet/dist/images/marker-shadow.png";
+L.Icon.Default.mergeOptions({ iconRetinaUrl, iconUrl, shadowUrl });
 
-const API = "http://localhost:8000";
+const API =
+  (typeof import.meta !== "undefined" &&
+    import.meta.env &&
+    import.meta.env.VITE_API_BASE) ||
+  (typeof process !== "undefined" &&
+    process.env &&
+    process.env.VUE_APP_API_BASE) ||
+  "http://localhost:8000";
 
 export default {
+  name: "App",
   data() {
     return {
-      input: "",
-      userAddress: "",
-      userLocation: null,
-
+      inputProducts: "mlijeko 2.8%\nčokolada",
+      address: "Omladinska 18, Rovinj",
+      coords: null,
+      radius: 3000,
       sortBy: "distance",
-      radiusM: 3000,
-
+      minItems: 0,
+      useOSM: true,
+      preferReal: true,
       recommendations: [],
+      brands: [],
+      loadingGeo: false,
+      loadingRec: false,
+      loadingIngest: false,
       error: "",
-      notice: "",
-      isLoading: false,
-
+      toast: { show: false, msg: "", kind: "info" },
+      useDynamo: false,
+      // mapa
       map: null,
+      markersLayer: null,
+      userMarker: null,
       markers: [],
     };
   },
-  computed: {
-    displayedRecommendations() {
-      return (this.recommendations || []).filter(
-        (r) => (r.items_found || 0) > 0
-      );
-    },
-    hiddenCount() {
-      return (
-        (this.recommendations || []).length -
-        this.displayedRecommendations.length
-      );
-    },
-  },
-  mounted() {
-    this.$nextTick(() => this.initMap());
-  },
   methods: {
-    euro(x) {
-      return `${(x ?? 0).toFixed(2)} €`;
+    showToast(msg, kind = "info", ms = 2200) {
+      this.toast = { show: true, msg, kind };
+      setTimeout(() => (this.toast.show = false), ms);
     },
-    initMap() {
-      const el = document.getElementById("map");
-      if (!el) return;
-
-      this.map = L.map(el).setView([45.1, 13.6], 12);
+    parseProducts() {
+      return (this.inputProducts || "")
+        .split("\n")
+        .map((s) => s.trim())
+        .filter(Boolean)
+        .map((name) => ({ name }));
+    },
+    ensureMap() {
+      if (this.map) return;
+      this.map = L.map(this.$refs.map, {
+        zoomAnimation: false,
+        markerZoomAnimation: false,
+      }).setView([45.081, 13.64], 13);
 
       L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+        maxZoom: 19,
         attribution: "&copy; OpenStreetMap contributors",
       }).addTo(this.map);
 
-      delete L.Icon.Default.prototype._getIconUrl;
-      L.Icon.Default.mergeOptions({
-        iconRetinaUrl: "/leaflet/marker-icon-2x.png",
-        iconUrl: "/leaflet/marker-icon.png",
-        shadowUrl: "/leaflet/marker-shadow.png",
-      });
+      this.markersLayer = L.layerGroup().addTo(this.map);
+      this.map.whenReady(() => this.map.invalidateSize());
     },
-    addMarkers(recommendations) {
-      if (!this.map) return;
-      this.markers.forEach((m) => this.map.removeLayer(m));
+    setUserLocation(lat, lon) {
+      this.ensureMap();
+      if (this.userMarker) this.userMarker.setLatLng([lat, lon]);
+      else {
+        this.userMarker = L.marker([lat, lon], { title: "Vi ste ovdje" }).addTo(
+          this.map
+        );
+      }
+      this.map.setView([lat, lon], 13, { animate: false });
+    },
+    renderShops(shops) {
+      this.ensureMap();
+      this.map.stop();
+      this.markersLayer.clearLayers();
       this.markers = [];
 
-      (recommendations || [])
-        .filter((r) => (r.items_found || 0) > 0)
-        .forEach((shop) => {
-          const marker = L.marker([shop.lat, shop.lon]).addTo(this.map);
-          marker.bindPopup(`
-            <b>${shop.shop_name}</b><br/>
-            Ukupno: ${this.euro(shop.total_price)}<br/>
-            Artikli: ${shop.items_found}<br/>
-            <ul style="margin:6px 0 0; padding-left:18px; max-height:140px; overflow:auto;">
-              ${shop.matched_products
-                .map(
-                  (p) =>
-                    `<li>${p.name} — ${this.euro(
-                      p.price
-                    )} <span style="border:1px solid #d1d5db;border-radius:8px;padding:1px 6px;margin-left:6px;font-size:12px;background:${
-                      p.source === "dummy" ? "#f3f4f6" : "#ecfdf5"
-                    }">${
-                      p.source === "dummy" ? "dummy" : "katalog"
-                    }</span></li>`
-                )
-                .join("")}
-            </ul>
-          `);
-          this.markers.push(marker);
-        });
+      const bounds = L.latLngBounds([]);
+      shops.forEach((s, idx) => {
+        if (typeof s.lat !== "number" || typeof s.lon !== "number") return;
+        const mk = L.marker([s.lat, s.lon])
+          .bindPopup(
+            `<b>${s.shop_name}</b><br/>${s.brand}<br/>${s.items_found} artikala<br/>` +
+              (s.total_price != null
+                ? `Ukupno: ${s.total_price.toFixed(2)} €`
+                : "")
+          )
+          .addTo(this.markersLayer);
+        mk.on("click", () => this.scrollToCard(idx));
+        this.markers.push(mk);
+        bounds.extend([s.lat, s.lon]);
+      });
 
-      if (this.userLocation) {
-        const userMarker = L.circleMarker(
-          [this.userLocation.lat, this.userLocation.lon],
-          {
-            radius: 8,
-            fillColor: "#0ea5e9",
-            color: "#fff",
-            weight: 1,
-            opacity: 1,
-            fillOpacity: 0.85,
-          }
-        ).addTo(this.map);
-        userMarker.bindPopup("🧍 Tvoja lokacija");
-        this.markers.push(userMarker);
-        this.map.setView([this.userLocation.lat, this.userLocation.lon], 13);
+      if (bounds.isValid()) {
+        setTimeout(
+          () =>
+            this.map.fitBounds(bounds, { padding: [20, 20], animate: false }),
+          0
+        );
       }
     },
-    async refreshCatalogs() {
+    focusMarker(idx) {
+      const mk = this.markers[idx];
+      if (!mk) return;
+      mk.openPopup();
+      this.map.setView(mk.getLatLng(), this.map.getZoom(), { animate: false });
+    },
+    scrollToCard(idx) {
+      const el = document.getElementById("shop-" + idx);
+      if (!el) return;
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("hl");
+      setTimeout(() => el.classList.remove("hl"), 800);
+    },
+    async geocode() {
       this.error = "";
-      this.notice = "";
+      this.loadingGeo = true;
       try {
-        const res = await axios.post(`${API}/api/catalog/ingest/all`);
-        const ok = Object.entries(res.data)
-          .filter(([, v]) => v.ok)
-          .map(([b, v]) => `${b}: ${v.count}`)
-          .join(", ");
-        const fail = Object.entries(res.data)
-          .filter(([, v]) => !v.ok)
-          .map(([b, v]) => `${b}: ${v.error}`)
-          .join(" | ");
-        this.notice =
-          `Osvježeno — ${ok || "nema podataka"}` +
-          (fail ? ` | Greške: ${fail}` : "");
+        const r = await fetch(
+          `${API}/api/geo/geocode?address=${encodeURIComponent(this.address)}`
+        );
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        this.coords = data;
+        this.setUserLocation(data.lat, data.lon);
       } catch (e) {
-        console.error(e);
-        this.error = "Neuspjelo osvježavanje kataloga.";
-      }
-    },
-    async fetchRecommendation() {
-      this.error = "";
-      this.notice = "";
-      this.isLoading = true;
-      this.recommendations = [];
-
-      const products = this.input
-        .split("\n")
-        .map((p) => p.trim())
-        .filter((p) => p.length > 0)
-        .map((name) => ({ name }));
-
-      if (!products.length) {
-        this.error = "Unesi barem jedan proizvod.";
-        this.isLoading = false;
-        return;
-      }
-      if (!this.userLocation) {
-        this.error =
-          "Unesi adresu (npr. 'Omladinska ulica 18, Rovinj') i klikni Lokacija.";
-        this.isLoading = false;
-        return;
-      }
-
-      try {
-        const url =
-          `${API}/api/products/recommend` +
-          `?sort_by=${encodeURIComponent(this.sortBy)}` +
-          `&prefer_real_catalog=true&use_osm=true&radius_m=${this.radiusM}&min_items=1`;
-
-        const { data } = await axios.post(url, {
-          products,
-          user_location: this.userLocation,
-        });
-
-        this.recommendations = Array.isArray(data) ? data : [];
-        this.addMarkers(this.recommendations);
-
-        if (this.displayedRecommendations.length === 0) {
-          this.notice = "Nema pogodaka u radijusu za unesene proizvode.";
-        }
-      } catch (err) {
-        console.error(err);
-        this.error = "Greška prilikom dohvaćanja rezultata.";
+        this.error = String(e);
+        this.showToast("Greška pri geokodiranju", "error");
       } finally {
-        this.isLoading = false;
+        this.loadingGeo = false;
       }
     },
-    async getLocationFromAddress() {
+    async recommend() {
       this.error = "";
-      this.notice = "";
-      if (!this.userAddress.trim()) {
-        this.error = "Unesi adresu (npr. 'Omladinska ulica 18, Rovinj').";
-        return;
-      }
-
+      this.loadingRec = true;
       try {
-        const { data } = await axios.get(`${API}/api/geo/geocode`, {
-          params: { address: this.userAddress },
+        if (!this.coords) await this.geocode();
+        const body = {
+          products: this.parseProducts(),
+          user_location: this.coords,
+          radius_m: this.radius,
+          sort_by: this.sortBy,
+          min_items: this.minItems,
+          use_osm: this.useOSM,
+          prefer_real_catalog: this.preferReal,
+        };
+        const r = await fetch(`${API}/api/products/recommend`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
-
-        if (
-          data &&
-          typeof data.lat === "number" &&
-          typeof data.lon === "number"
-        ) {
-          this.userLocation = { lat: data.lat, lon: data.lon };
-          if (this.map) this.map.setView([data.lat, data.lon], 13);
-          this.notice = "Lokacija postavljena.";
-        } else {
-          this.error =
-            "Nije pronađena lokacija za ovu adresu. Pokušaj: 'Ulica i broj, Grad'.";
-          this.userLocation = null;
-        }
-      } catch (err) {
-        console.error("Greška kod lokacije:", err);
-        this.error = "Greška pri dohvaćanju lokacije.";
-        this.userLocation = null;
+        if (!r.ok) throw new Error(await r.text());
+        this.recommendations = await r.json();
+        this.renderShops(this.recommendations);
+        this.showToast(
+          `Pronađeno ${this.recommendations.length} trgovina`,
+          "ok"
+        );
+      } catch (e) {
+        this.error = String(e);
+        this.showToast("Greška pri preporuci", "error");
+      } finally {
+        this.loadingRec = false;
       }
     },
+    async fetchBrands() {
+      this.error = "";
+      try {
+        const r = await fetch(`${API}/api/catalog/brands`);
+        if (!r.ok) throw new Error(await r.text());
+        this.brands = await r.json();
+      } catch (e) {
+        this.error = String(e);
+        this.showToast("Greška pri dohvaćanju brendova", "error");
+      }
+    },
+    async ingestAll() {
+      this.error = "";
+      this.loadingIngest = true;
+      try {
+        const r = await fetch(`${API}/api/catalog/ingest-all`, {
+          method: "POST",
+        });
+        if (!r.ok) {
+          const t = await r.text();
+          console.warn("ingest-all:", t);
+          this.showToast("Dynamo nije dostupan", "warn");
+          return;
+        }
+        await this.fetchBrands();
+        this.showToast("Ingest završen", "ok");
+      } catch (e) {
+        this.error = String(e);
+        this.showToast("Greška pri ingestu", "error");
+      } finally {
+        this.loadingIngest = false;
+      }
+    },
+    async fetchHealth() {
+      try {
+        const r = await fetch(`${API}/health`);
+        const h = await r.json();
+        this.useDynamo = !!h.use_dynamo;
+      } catch (e) {
+        this.useDynamo = false;
+        if (
+          typeof console !== "undefined" &&
+          process.env.NODE_ENV !== "production"
+        ) {
+          console.debug("Health fetch failed:", e);
+        }
+      }
+    },
+  },
+  async mounted() {
+    this.ensureMap();
+    await this.fetchHealth();
+    await this.fetchBrands();
+    await this.geocode();
   },
 };
 </script>
 
 <style>
 :root {
-  --bg: #f5f7fb;
-  --card: #ffffff;
-  --muted: #6b7280;
-  --accent: #22c55e;
-  --accent-2: #0ea5e9;
-  --border: #e5e7eb;
-  --shadow: 0 2px 10px rgba(0, 0, 0, 0.06);
+  --accent: #2563eb;
+  --bg: #fff;
+  --muted: #f5f7fb;
+  --border: #e6e8ef;
+  --text: #111827;
 }
-
 * {
   box-sizing: border-box;
 }
 body {
-  background: var(--bg);
+  margin: 0;
+  background: var(--muted);
+  color: var(--text);
 }
 
-.layout {
-  max-width: 1200px;
-  margin: 24px auto;
+/* centriran naslov */
+.header {
+  text-align: center;
+  padding: 8px 0 12px;
+}
+.header h1 {
+  margin: 0;
+  font-weight: 800;
+  letter-spacing: 0.2px;
+}
+.logo {
+  font-size: 0.9em;
+}
+
+/* layout: lijevi panel odvojen + sticky */
+.app {
+  max-width: 1260px;
+  margin: 0 auto 48px;
   padding: 0 16px;
 }
+.layout {
+  display: grid;
+  grid-template-columns: 380px 1fr;
+  gap: 28px;
+  align-items: start;
+}
+.panel {
+  position: sticky;
+  top: 12px;
+  align-self: start;
+}
+.panel .card {
+  margin-bottom: 14px;
+}
 
+/* kartice + odvajanja */
 .card {
-  background: var(--card);
+  background: var(--bg);
   border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
+  border-radius: 18px;
+  padding: 14px;
+  box-shadow: 0 8px 16px rgba(17, 24, 39, 0.04);
 }
-.input-card {
-  padding: 16px;
+.card h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
 }
 
-.grid-2 {
+.row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 8px;
+}
+.grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 16px;
+  gap: 10px;
 }
-
 .lbl {
   display: block;
-  font-weight: 600;
-  margin-bottom: 6px;
+  font-size: 12px;
+  color: #555;
+  margin-bottom: 4px;
 }
-.txt {
+
+textarea,
+input,
+select {
   width: 100%;
-  padding: 10px 12px;
+  padding: 10px;
   border: 1px solid var(--border);
   border-radius: 10px;
-  outline: none;
   background: #fff;
 }
-
-.hint {
-  color: var(--muted);
-  margin-top: 6px;
-}
-.hint .pill {
-  display: inline-block;
-  margin: 4px 6px 0 0;
-  padding: 2px 8px;
-  background: #eef2ff;
-  border: 1px solid #e5e7eb;
-  border-radius: 999px;
-  font-size: 12px;
-}
-
-.controls-row {
+.toggles {
   display: flex;
-  gap: 12px;
+  gap: 10px;
   align-items: center;
-  margin-top: 10px;
-}
-.inline select {
-  margin-left: 6px;
+  padding-top: 8px;
+  flex-wrap: wrap;
 }
 
-.buttons {
+/* gumbi */
+.actions {
   display: flex;
   gap: 8px;
-  margin-top: 10px;
+  flex-wrap: wrap;
 }
-button {
-  padding: 10px 14px;
-  font-weight: 600;
-  background: #e5e7eb;
-  color: #111827;
+.btn {
+  padding: 10px 12px;
   border: 1px solid var(--border);
+  background: #fff;
   border-radius: 10px;
   cursor: pointer;
 }
-button.primary {
+.btn:hover {
+  background: #fafafa;
+}
+.btn.primary {
   background: var(--accent);
-  color: white;
-  border: none;
+  border-color: var(--accent);
+  color: #fff;
 }
-button.secondary {
-  background: var(--accent-2);
-  color: white;
-  border: none;
-}
-button:hover {
+.btn.primary:hover {
   filter: brightness(0.97);
 }
-
-.muted {
-  color: var(--muted);
-  margin-top: 6px;
-}
-.muted.sm {
-  font-size: 12px;
-}
-.notice {
-  color: #0d9488;
-  margin-top: 6px;
-}
-.error {
-  color: #dc2626;
-  margin-top: 6px;
+.btn.ghost {
+  background: transparent;
 }
 
-.content {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 18px;
-  margin-top: 18px;
-}
-
-/* scrollable results */
-.results-panel {
-  padding: 14px;
-  max-height: 72vh;
-  overflow: auto;
-}
-
-#map {
-  width: 100%;
-  height: 72vh;
-  border-radius: 12px;
-}
-
-.map-panel {
-  padding: 8px;
-}
-
-.shop-card {
-  background: #fff;
-  border: 1px solid var(--border);
-  margin: 12px 0;
-  padding: 14px;
-  border-radius: 12px;
-}
-
-.shop-header {
+/* mapa */
+.right {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  flex-direction: column;
+  gap: 16px;
+}
+.map {
+  height: 520px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: #fff;
 }
 
+/* brandovi */
+.brands .chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
 .chip {
-  background: #eef6ee;
-  color: #176b2a;
-  padding: 4px 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: #fff;
+}
+
+/* rezultati — vlastiti scroller + razdvojene kartice trgovina */
+.results-board {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+}
+.results-head {
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.results-scroller {
+  max-height: clamp(280px, 46vh, 560px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px;
+}
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.card.rec {
+  border-radius: 14px;
+  box-shadow: 0 6px 12px rgba(17, 24, 39, 0.05);
+}
+.card.rec .card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.brand {
+  background: rgba(37, 99, 235, 0.1);
+  color: var(--accent);
+  padding: 2px 8px;
   border-radius: 999px;
   font-size: 12px;
-  border: 1px solid #cfe7cf;
 }
-
-.shop-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(120px, 1fr));
-  gap: 12px;
-  margin-top: 8px;
+.items {
+  margin: 8px 0 0;
+  padding-left: 18px;
 }
-
-.stat {
-  background: #f9fafb;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 10px;
-}
-.stat .label {
-  display: block;
-  color: var(--muted);
-  font-size: 12px;
-  margin-bottom: 4px;
-}
-.stat .value {
-  font-weight: 700;
-}
-
-.matched {
-  margin-top: 10px;
-}
-
-.tag {
-  margin-left: 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 1px 6px;
-  font-size: 12px;
-}
-.tag-green {
-  background: #ecfdf5;
-  color: #065f46;
-  border-color: #a7f3d0;
-}
-.tag-gray {
-  background: #f3f4f6;
+.coords {
+  margin-top: 6px;
   color: #374151;
-  border-color: #d1d5db;
+}
+.hl {
+  outline: 2px solid var(--accent);
+  transition: outline 0.2s;
 }
 
-.loading,
-.empty {
-  padding: 16px;
-  font-weight: bold;
+/* toast */
+.toast {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  background: #111;
+  color: #fff;
+  padding: 10px 12px;
+  border-radius: 10px;
+  opacity: 0.95;
+  z-index: 9999;
+}
+.toast.ok {
+  background: #16a34a;
+}
+.toast.warn {
+  background: #ca8a04;
+}
+.toast.error {
+  background: #b00020;
 }
 
+/* responsive */
 @media (max-width: 980px) {
-  .grid-2 {
+  .layout {
     grid-template-columns: 1fr;
   }
-  .content {
-    grid-template-columns: 1fr;
+  .map {
+    height: 420px;
   }
-  #map {
-    height: 56vh;
+}
+.spinner {
+  width: 14px;
+  height: 14px;
+  border: 2px solid #fff;
+  border-right-color: transparent;
+  border-radius: 50%;
+  display: inline-block;
+  vertical-align: -2px;
+  animation: spin 0.7s linear infinite;
+}
+.btn:not(.primary) .spinner {
+  border-color: #999;
+  border-right-color: transparent;
+}
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
+}
+.error {
+  margin-top: 12px;
+  color: #b00020;
 }
 </style>
